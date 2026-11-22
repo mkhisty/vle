@@ -1,0 +1,44 @@
+# Local environment configuration and credentials
+.env
+.env.*
+!.env.example
+!.env.template
+.aws/
+
+# Python environments and generated package files
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Downloaded packages, models, and container images
+.cache/
+.pixi/
+.pixi-cache/
+.charliecloud/
+.charliecloud.vla-eval-lock
+
+# Generated experiment output
+results/
+*.log
+
+# Test and analysis caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Editor and operating-system files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.nfs*
