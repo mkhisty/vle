@@ -1,0 +1,17 @@
+# One LIBERO-Goal rollout per invocation. Override the prompt with
+# --param 'instruction_override="saved instruction"'. Null uses the original.
+extends: goal.yaml
+
+output_dir: ./results/libero-goal-instruction-pilot
+
+benchmarks:
+  - benchmark: "vla_eval.benchmarks.libero.benchmark:LIBEROBenchmark"
+    subname: libero_goal
+    max_tasks: 1
+    episodes_per_task: 1
+    max_steps: 300
+    params:
+      suite: libero_goal
+      seed: 7
+      num_steps_wait: 10
+      instruction_override: null

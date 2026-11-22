@@ -1,0 +1,58 @@
+# BEHAVIOR-1K — OmniGibson on NVIDIA Isaac Sim (https://behavior.stanford.edu)
+#
+# BEHAVIOR Challenge 2026 stack: BEHAVIOR-1K v3.9.4, Isaac Sim 5.1.0, Python 3.11, 100 tasks.
+# Built FROM upstream's official image (docker/Dockerfile, published by build-push-containers.yml), which
+# runs setup.sh --omnigibson --bddl --joylo --primitives --eval into the conda env ``behavior``.
+# This file only adds the harness.  The dataset (~32 GiB) is NOT baked in; it is mounted at /data
+# (the image's OMNIGIBSON_DATA_PATH).
+#
+# Hardware requirements: NVIDIA GPU with Vulkan, driver >= 570 (CUDA 12.8 torch).
+
+# Digest of stanfordvl/behavior:3.9.4 (image revision fe66cc7 = tag v3.9.4, amd64 only); ch-image rejects
+# a ref with both tag and digest.
+ARG BEHAVIOR_IMAGE=stanfordvl/behavior@sha256:6f8ca9a97ba044d7c65a5854fb74267bb8ecd00d3848ca296b83178133669929
+FROM ${BEHAVIOR_IMAGE}
+
+# Build-time license confirmation.  The user must explicitly opt in
+# the same way Stanford's setup.sh requires --accept-nvidia-eula.
+ARG ACCEPT_NVIDIA_EULA
+RUN if [ "$ACCEPT_NVIDIA_EULA" != "YES" ]; then \
+        echo ""; \
+        echo "============================================================"; \
+        echo "Building BEHAVIOR-1K requires accepting two licenses:"; \
+        echo "  1. NVIDIA Isaac Sim EULA"; \
+        echo "     https://docs.omniverse.nvidia.com/eula/"; \
+        echo "  2. BEHAVIOR Dataset Terms of Service (at runtime, when"; \
+        echo "     you download/mount the encrypted scene+object bundle)"; \
+        echo ""; \
+        echo "Read the EULAs above, then re-run with:"; \
+        echo "  docker build --build-arg ACCEPT_NVIDIA_EULA=YES ..."; \
+        echo "  (or: docker/build.sh behavior1k --accept-license behavior1k)"; \
+        echo "============================================================"; \
+        exit 1; \
+    fi
+
+# OmniGibson torch.compile()s at import, and Triton links with -lcuda, which needs the unversioned name.
+# Runtimes inject only libcuda.so.1: Docker into /usr/lib/x86_64-linux-gnu, ch-fromhost into the first
+# ``ldconfig -Nv`` directory.
+RUN for d in /usr/lib/x86_64-linux-gnu "$(/sbin/ldconfig -Nv 2>/dev/null | grep -E '^/' | cut -d: -f1 | head -1)"; do \
+        ln -sfn libcuda.so.1 "$d/libcuda.so"; \
+    done
+
+# Non-interactive headless runs; the official image only accepts the EULA during setup.sh.
+ENV OMNIGIBSON_HEADLESS=1 \
+    OMNI_KIT_ACCEPT_EULA=YES \
+    ACCEPT_EULA=Y \
+    PRIVACY_CONSENT=Y
+
+WORKDIR /workspace
+COPY pyproject.toml README.md ./
+COPY src/ src/
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+RUN /opt/conda/envs/behavior/bin/python -m pip install --no-cache-dir -e .
+COPY configs/ configs/
+
+# Upstream's /entrypoint.sh activates the ``behavior`` env (incl. its activate.d hooks), then execs.
+ENTRYPOINT ["/entrypoint.sh", "vla-eval"]
+CMD ["run", "--config", "/workspace/configs/benchmarks/behavior1k/eval.yaml"]

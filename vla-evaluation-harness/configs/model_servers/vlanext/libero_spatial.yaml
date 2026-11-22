@@ -1,0 +1,4 @@
+# VLANeXt-B — LIBERO-spatial, weights VLANeXt_libero_spatial.pt
+extends: _base.yaml
+args:
+  suite: libero_spatial

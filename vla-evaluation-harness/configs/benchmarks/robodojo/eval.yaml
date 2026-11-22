@@ -1,0 +1,133 @@
+# RoboDojo full simulation protocol (arXiv:2607.04434, Table 1 setting).
+#
+# 42 tasks across five capability dimensions. Episode counts follow the
+# published per-task eval_nums (task/RoboDojo/config/_task.yml): 50 episodes
+# for most tasks; the 12 Generalization tasks run 25 standard + 25 randomized
+# episodes via their `_random` task variants. `seed` selects the published
+# Eval_Layout group; the paper reports mean +/- std over three training seeds,
+# each evaluated once per task with this layout protocol.
+#
+# The paper's headline numbers average the five dimension means (NOT the plain
+# per-task mean); unstable layouts are recorded as skipped and left out, as upstream.
+#
+# num_envs (envs per round, default 1) must match the policy's upstream setting:
+# 1 if its XPolicyLab deploy.yml has eval_batch: false, else 10. A model server may
+# ask for it (robodojo_pi05 asks for 10); *_random tasks run at most 5.
+#
+# One process runs the tasks in turn; scripts/run_robodojo_protocol.sh runs one per
+# `vla-eval run`, scripts/run_sharded.sh shards whole tasks (see README).
+server:
+  url: "ws://localhost:8000"
+  # Three 640x480 cameras per env, num_envs at once: PNG encoding saturates the benchmark CPU while
+  # the model server waits. Raw is a memcpy; use png/jpeg when the server is across a slow network.
+  image_format: raw
+
+docker:
+  image: ghcr.io/allenai/vla-evaluation-harness/robodojo:latest
+  env:
+    - "NVIDIA_DRIVER_CAPABILITIES=all"
+    - "ACCEPT_EULA=Y"
+    - "PRIVACY_CONSENT=Y"
+    # The image pins VK_ICD_FILENAMES to the toolkit-injected /etc ICD, which some
+    # hosts don't create — Vulkan then dies with ERROR_INCOMPATIBLE_DRIVER. Use the
+    # image's own ICD, which exists everywhere.
+    - "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json"
+    - "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json"  # newer Vulkan loaders prefer this over VK_ICD_FILENAMES
+  volumes:
+    - "${oc.env:ROBODOJO_ASSETS,${oc.env:VLA_EVAL_ASSETS_CACHE,${oc.env:XDG_CACHE_HOME,${oc.env:HOME}/.cache}/vla-eval/assets}/robodojo/Assets}:/workspace/RoboDojo/Assets:ro"
+
+output_dir: "./results"
+
+benchmarks:
+  # -- Generalization: 12 tasks, 25 standard episodes each ------------------
+  - benchmark: "vla_eval.benchmarks.robodojo.benchmark:RoboDojoBenchmark"
+    episodes_per_task: 25
+    action_dim: 14
+    params:
+      seed: 0
+      tasks:
+        - stack_bowls
+        - push_T
+        - pack_objects_into_box
+        - fold_clothes
+        - hang_mugs
+        - sweep_blocks
+        - pour_liquid_into_cup
+        - make_toast
+        - arrange_largest_number
+        - sort_nesting_dolls_by_size
+        - store_laptop_and_headphones
+        - stack_blocks
+
+  # -- Generalization: the same 12 tasks, 25 randomized episodes each -------
+  - benchmark: "vla_eval.benchmarks.robodojo.benchmark:RoboDojoBenchmark"
+    episodes_per_task: 25
+    action_dim: 14
+    params:
+      seed: 0
+      tasks:
+        - stack_bowls_random
+        - push_T_random
+        - pack_objects_into_box_random
+        - fold_clothes_random
+        - hang_mugs_random
+        - sweep_blocks_random
+        - pour_liquid_into_cup_random
+        - make_toast_random
+        - arrange_largest_number_random
+        - sort_nesting_dolls_by_size_random
+        - store_laptop_and_headphones_random
+        - stack_blocks_random
+
+  # -- Open (8) + Memory (5) + Precision (8) + Long-Horizon (6): 50 eps -----
+  - benchmark: "vla_eval.benchmarks.robodojo.benchmark:RoboDojoBenchmark"
+    episodes_per_task: 50
+    action_dim: 14
+    params:
+      seed: 0
+      tasks:
+        # Open
+        - align_blocks
+        - solve_equation
+        - stack_blocks_by_language
+        - general_pickup
+        - classify_objects_by_language
+        - pick_from_conveyor_by_image
+        - store_tools_in_toolbox
+        - pour_by_language
+        # Memory (imitate_sorting_sequence is in the competition entry below)
+        - cover_blocks
+        - match_and_pick_from_conveyor
+        - swap_T
+        - press_by_number
+        - swap_blocks
+        # Precision
+        - fasten_screws
+        - insert_tubes
+        - plug_in_charger
+        - pour_balls_into_vase
+        - play_Xylophone
+        - deposit_coin
+        - insert_key
+        - build_tower
+        # Long-Horizon (make_kong / play_tic_tac_toe are in the entry below)
+        - put_bottles_into_dustbin
+        - classify_objects
+        - fill_pen_holder
+        - fill_egg_holder
+        - organize_table
+        - play_stacking_toy
+
+  # -- Franka-competition tasks: a scripted Franka arm shares the scene -----
+  # (robot config switched automatically by RoboDojo's process_config). Policy
+  # action space stays dual-X5 14-D; the Franka replays pkl trajectories, no planner.
+  # An episode whose scripted move fails is skipped, as upstream.
+  - benchmark: "vla_eval.benchmarks.robodojo.benchmark:RoboDojoBenchmark"
+    episodes_per_task: 50
+    action_dim: 14
+    params:
+      seed: 0
+      tasks:
+        - imitate_sorting_sequence   # Memory
+        - make_kong                  # Long-Horizon
+        - play_tic_tac_toe           # Long-Horizon

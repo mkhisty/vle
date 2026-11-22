@@ -1,0 +1,134 @@
+# Render Backends
+
+Benchmarks render on the GPU by default. `--render cpu` moves the simulator to
+software rendering and starts its container with no GPU attached, leaving the
+device to the model server.
+
+```bash
+vla-eval run -c configs/benchmarks/libero/spatial.yaml --render cpu
+scripts/run_sharded.sh -c configs/benchmarks/libero/spatial.yaml -n 16 --render cpu
+```
+
+Or in the config, which `--render` overrides:
+
+```yaml
+render: cpu   # top-level, alongside output_dir / server / docker
+```
+
+## When to use it
+
+On a single-GPU host, simulator rendering and model inference land on the same
+device. CUDA compute and GPU rendering readback on one device abort
+nondeterministically in the NVIDIA driver — a controlled A/B measured 6/6 stable
+runs when split across two devices against 4/4 aborting when co-tenant. CPU
+rendering removes the contention entirely.
+
+Software rendering is substantially slower per frame, so this trades simulator
+throughput for a free GPU. It pays off when inference is the bottleneck, or when
+GPU contention is crashing runs outright.
+
+## Support by benchmark
+
+A simulator is not a renderer, so the table separates the two. MuJoCo draws with its
+own built-in OpenGL renderer; what a backend chooses is the **GL context provider** —
+EGL on an NVIDIA device for `gpu`, OSMesa (pure-software GL) or an EGL software device
+for `cpu`. SAPIEN draws through Vulkan, where lavapipe is Mesa's software driver.
+PyBullet ships two rasterizers of its own (hardware OpenGL via its EGL plugin, and the
+software TinyRenderer). Kinetix computes frames as JAX arrays and has no GL at all.
+
+The `cpu` column was measured on each benchmark's image with no GPU attached; nothing
+is inferred from the simulator's name. The `gpu` column is the image's shipped NVIDIA
+path.
+
+| Benchmark | Simulator | `gpu` | `cpu` | `cpu` render path | Notes |
+|---|---|:--:|:--:|---|---|
+| LIBERO (+ Pro / Plus / Mem) | MuJoCo | ✅ | ✅ | OSMesa | |
+| RoboCasa | MuJoCo | ✅ | ✅ | OSMesa | |
+| RoboCasa365 | MuJoCo | ✅ | ✅ | OSMesa | |
+| RoboCerebra | MuJoCo | ✅ | ✅ | OSMesa | |
+| DuoBench | MuJoCo + rcs | ✅ | ✅ | EGL on Mesa's software device | Not OSMesa: its rcs camera stack bootstraps a real EGL context regardless of `MUJOCO_GL`, so cpu keeps EGL and pins `MUJOCO_EGL_DEVICE_ID` to the only (software) device |
+| VLABench | dm_control (MuJoCo) | ✅ | ✅ | OSMesa | |
+| MolmoSpaces-Bench | MuJoCo | ✅ | ✅ | OSMesa | AI2-THOR lineage is in the assets, not the renderer. The adapter stubs the macOS-only `mujoco.cgl` module that molmo_spaces calls on the GPU-less path |
+| RoboMME | SAPIEN 3.0.3 | ✅ | ✅ | lavapipe (software Vulkan) | Shipped configs default to `render: cpu`; `--render gpu` opts into the native path, which hangs on a small subset of hosts. See below |
+| CALVIN | PyBullet | ✅ | ✅ | TinyRenderer | The EGL plugin aborts the whole process with no GPU, so cpu swaps it for PyBullet's built-in rasterizer — frames are close to, but not pixel-identical with, the GPU path's |
+| Kinetix | JAX (no GL) | ✅ | ✅ | `JAX_PLATFORMS=cpu` | No GL: frames are computed as JAX arrays, so the device switch is the whole backend |
+| SimplerEnv | SAPIEN 2.2.2 | ✅ | ✅ | lavapipe (software Vulkan) | Needs a lavapipe from Mesa >= 24.3, which the image installs from conda-forge into its own prefix. See below |
+| ManiSkill2 | SAPIEN 2.2.2 | ✅ | ✅ | lavapipe (software Vulkan) | same |
+| RoboTwin | SAPIEN 3.0.0b1 | ✅ | ❌ | — | Fails on the image's Mesa 23.2 lavapipe with `ErrorExtensionNotPresent`. Not re-measured against a newer Mesa |
+| MIKASA-Robo | SAPIEN 3.0.0b1 | ✅ | ❌ | — | same |
+| BEHAVIOR-1K | OmniGibson (Isaac Sim) | ✅ | ❌ | — | Isaac Sim dumps core during extension startup with no GPU |
+| RoboDojo | Isaac Lab | ✅ | ❌ | — | Isaac reports `ERROR_INCOMPATIBLE_DRIVER` / "Failed to create any GPU devices" with no GPU; the RTX renderer has no software path |
+
+**AMD GPUs**: the harness can attach ROCm devices — on a ROCm runtime, `docker.gpus`
+mounts `/dev/kfd` and `/dev/dri` instead of passing `--gpus` — but no benchmark's
+*rendering* has been measured on ROCm. The `gpu` column makes no claim about AMD.
+
+Anything not declared fails fast, before the image is pulled:
+
+```
+ERROR: render: cpu is not supported by:
+  MIKASABenchmark does not support render: cpu (declares render_backends: gpu)
+```
+
+Failing is deliberate. Falling back to the GPU would reinstate the crash the flag
+exists to avoid, and a backend that is declared but doesn't engage is worse than
+one that isn't offered.
+
+### SAPIEN software rendering
+
+The conda-forge lavapipe is built without `memfd_create`, so it backs device memory with unlinked files under
+`$XDG_RUNTIME_DIR`, or `/tmp/xdg-runtime-mesa-<uid>` when that is unset (Mesa `util/anon_file.c`). Every frame is
+then a file write; on a node-local disk that throttles on dirty pages once a few dozen shards render at once
+(SimplerEnv: 0.34 s/step at 16 shards, 6 s/step at 64). CPU mode therefore symlinks that fallback directory to
+`/dev/shm` (tmpfs) — only that path; a user's own `XDG_RUNTIME_DIR` is respected. Docker gets `--shm-size`
+(`docker.shm_size`, default `16g`) for `render: cpu`, since its default `/dev/shm` is 64 MiB.
+
+SAPIEN 2.2.2 requires `VK_KHR_external_semaphore_fd`, available in lavapipe since
+[Mesa 24.3](https://docs.mesa3d.org/relnotes/24.3.0.html). The ManiSkill2 and SimplerEnv
+images install Mesa 26.2.1 in `/opt/lavapipe-env`, leaving system libraries unchanged.
+CPU mode selects `/opt/lavapipe/lvp_icd.json` through both Vulkan loader variables,
+`VK_ICD_FILENAMES` and `VK_DRIVER_FILES`, and checks the manifests before creating
+the simulator to catch overrides that would expose a GPU.
+
+RoboTwin and MIKASA-Robo remain unsupported: they fail with the shipped Mesa 23.2
+and have not been tested with newer lavapipe.
+
+RoboMME carries two caveats. First, its shipped configs default to `render: cpu`,
+unlike every other benchmark: the native path hangs at the first capture on a small
+subset of hosts, and no probe can certify one, because a render-only check passes
+where the combined CUDA plus rendering workload later hangs. Second, the gpu opt-in may need the host's
+Vulkan ICDs when the NVIDIA container toolkit injects none; the configs carry that
+mount as a comment. Keep it off by default: it shadows the image's lavapipe ICD and
+breaks the cpu path on Mesa-less hosts (`ROBOMME_LAVAPIPE_ICD` still overrides).
+
+## Scope and interaction with `docker.gpus`
+
+The setting is run-level, not per benchmark entry: the renderer binds at the first
+simulator import and cannot be rebound in-process.
+
+`render: cpu` implies no GPU device for the container. Where that meets an
+explicit `docker.gpus`, the rules are:
+
+| | outcome |
+|---|---|
+| `--render cpu` + `gpus:` in the config | CLI wins, forced to no device |
+| `render: cpu` + `gpus:` in the same config | rejected — the config contradicts itself |
+| `--render cpu` + `--gpus` | rejected — same precedence, neither outranks |
+| `gpus: none` + `render: gpu` | rejected — the simulator needs a device |
+
+Rejecting rather than guessing keeps a typed flag from being silently swallowed.
+
+## Provenance
+
+The requested mode and the env actually applied are recorded in the run metadata
+and flow into the merge aggregate.
+
+Under sharding every process writes metadata under one `eval_id`, and the store is
+first-writer-wins, so a shard that resolved differently would otherwise be
+invisible. A disagreeing write sets `render.divergent` and logs both values, so the
+record cannot claim one shard's answer for every episode.
+
+## Adding support to a benchmark
+
+Two lines plus a hook — see the Render Backends section of
+[CONTRIBUTING.md](../CONTRIBUTING.md#render-backends).

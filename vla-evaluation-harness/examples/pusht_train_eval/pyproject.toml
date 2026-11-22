@@ -1,0 +1,13 @@
+[project]
+name = "pusht-train-eval"
+version = "0.1.0"
+description = "Train a policy on a benchmark vla-eval does not ship, and evaluate it with vla-eval during training"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "vla-eval>=0.6.0",
+    "gym-pusht==0.1.6",
+    "pymunk<7",
+    "lerobot[dataset,diffusion]==0.6.0",
+    "torch>=2.7,<2.12",
+    "av>=12",
+]

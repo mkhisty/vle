@@ -22,7 +22,8 @@ dist/
 .charliecloud.vla-eval-lock
 
 # Generated experiment output
-results/
+/results/
+/vla-evaluation-harness/results/
 *.log
 
 # Test and analysis caches
