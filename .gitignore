@@ -24,6 +24,7 @@ dist/
 # Generated experiment output
 /results/
 /vla-evaluation-harness/results/
+/vla-evaluation-harness/docs/reproductions/data/
 *.log
 
 # Test and analysis caches

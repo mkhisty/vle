@@ -13,7 +13,7 @@ check:
 	uv run ty check
 
 test:
-	uv run --group leaderboard pytest
+	uv run pytest
 
 smoke:
 	uv run vla-eval test --all

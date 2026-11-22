@@ -32,17 +32,11 @@ dev = [
     "ruff>=0.9",
     "ty>=0.0.95",
 ]
-# leaderboard/scripts runtime deps. Tooling comes from `dev`, so CI can sync
-# `--dev --group leaderboard --no-install-project` without pulling vla_eval's runtime.
-leaderboard = [
-    "beautifulsoup4>=4.12",
-    "jsonschema>=4",
-    "markdownify>=0.14",
-    "typer>=0.12",
-]
-
 [tool.hatch.version]
 source = "vcs"
+
+[tool.hatch.version.raw-options]
+fallback_version = "0.9.1.dev4+g505ae54c1"
 
 [tool.hatch.build.hooks.vcs]
 version-file = "src/vla_eval/_version.py"
@@ -55,7 +49,7 @@ vla-eval = "vla_eval.cli.main:main"
 
 [tool.pytest.ini_options]
 # Explicit: keep discovery out of .cache, experiments, site.
-testpaths = ["tests", "leaderboard/tests"]
+testpaths = ["tests"]
 
 [tool.uv]
 # Fresh clones resolve to this date, so a newly published (possibly compromised) version is

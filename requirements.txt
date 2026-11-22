@@ -1,0 +1,4 @@
+-e ./vla-evaluation-harness
+-r testing/smolvla-requirements.txt
+openai
+backoff

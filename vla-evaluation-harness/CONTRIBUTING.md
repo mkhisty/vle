@@ -24,7 +24,7 @@ We're also open to contributions that improve the harness itself, including new 
 # Clone and install (requires uv: https://docs.astral.sh/uv/)
 git clone https://github.com/allenai/vla-evaluation-harness.git
 cd vla-evaluation-harness
-uv sync --python 3.11 --all-extras --dev --group leaderboard
+uv sync --python 3.11 --all-extras --dev
 ```
 
 ## Running Tests
